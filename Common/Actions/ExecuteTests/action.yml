@@ -1,0 +1,60 @@
+name: 'Execute Tests'
+description: 'Run Maven tests and upload reports'
+inputs:
+  tags:
+    description: 'Cucumber tags to filter tests'
+    required: true
+  report_name:
+    description: 'Name of the HTML report'
+    required: true
+  SLACK_WEBHOOK_URL:
+    description: 'The Slack webhook URL for sending notifications.'
+    required: true
+  JOB_NAME:
+    description: 'Job Name'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Restore repository checkout from cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}
+        key: ${{ runner.os }}-checkout-${{ github.sha }}
+
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: 11
+        distribution: 'adopt'
+
+    - name: Connect to VPN
+      uses: ./Common/Actions/VpnConnection
+
+    - name: Execute Maven Tests
+      shell: bash
+      run: mvn test -Denvironment=dev -Dtenant="test" -Dcucumber.filter.tags="${{ inputs.tags }}"
+
+    - name: Upload API Json artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.report_name }}-Action--json-Report
+        path: |
+          API/target/cucumber-json/webops-automation-tests.json  
+
+    - name: Upload Cucumber HTML Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.report_name }}--HTML-Report
+        path: API/target/cucumber-html-reports/webops-automation-tests.html
+
+    - name: Slack notification on failure
+      if: failure()
+      uses: ./Common/Actions/NotifyOnFailure
+      with:
+        SLACK_WEBHOOK_URL: ${{ inputs.SLACK_WEBHOOK_URL }}
+        JOB_NAME: ${{ inputs.JOB_NAME }}
+
+

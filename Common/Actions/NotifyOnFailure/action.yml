@@ -1,0 +1,59 @@
+name: 'Slack Notification on Failure'
+description: 'Sends Slack notification on workflow failure.'
+inputs:
+  SLACK_WEBHOOK_URL:
+    description: 'The Slack webhook URL for sending notifications.'
+    required: true
+  JOB_NAME:
+    description: 'Job Name'
+    required: true
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Restore repository checkout from cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}
+        key: ${{ runner.os }}-checkout-${{ github.sha }}
+
+    - name: Notify Slack on Failure
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.SLACK_WEBHOOK_URL }}
+        JOB_NAME: ${{ inputs.JOB_NAME }}
+      shell: bash
+      run: |
+        job_name=$JOB_NAME
+        github_run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        failed_scenarios=$(jq '.[].elements | map(select(.keyword == "Scenario" and (.steps | any(.result.status == "failed")))) | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        outline_failed_scenarios_count=$(jq '[.[] | .elements | map(select(.keyword == "Scenario Outline" and (.steps | any(.result.status == "failed"))))] | flatten | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        scenarios_count=$(jq '[.[] | .elements | map(select(.keyword == "Scenario"))] | flatten | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        total_failed_scenarios=$((failed_scenarios + outline_failed_scenarios_count))
+        if [[ "${{ github.event_name }}" == "schedule" ]]; then
+          execution_type="Scheduled"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          execution_type="Manual"
+          triggered_by="Triggered by: ${{ github.actor }}"
+        else
+          execution_type="Unknown"
+        fi
+        branch=$(echo "${{ github.ref }}" | sed 's/refs\/heads\///')
+        message="*${job_name}* Failed.\\nExecution type: *${execution_type}*\\nBranch: *${branch}*\\n${triggered_by}\\n:x:  Failed Test Cases: $total_failed_scenarios"
+        curl -X POST -H 'Content-type: application/json' --data "{
+          \"text\": \"$message\",
+          \"attachments\": [
+            {
+              \"fallback\": \"View on GitHub\",
+              \"actions\": [
+                {
+                  \"type\": \"button\",
+                  \"text\": \"View Execution Details\",
+                  \"url\": \"$github_run_url\",
+                  \"style\": \"danger\",
+                  \"emoji\": true
+                }
+              ]
+            }
+          ]
+        }" $SLACK_WEBHOOK_URL
+

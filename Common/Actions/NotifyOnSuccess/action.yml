@@ -1,0 +1,64 @@
+name: 'Slack Notification on Success'
+description: 'Sends Slack notification on workflow Success.'
+inputs:
+  SLACK_WEBHOOK_URL:
+    description: 'The Slack webhook URL for sending notifications.'
+    required: true
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Restore repository checkout from cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}
+        key: ${{ runner.os }}-checkout-${{ github.sha }}
+
+    - name: Notify Slack on Success
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.SLACK_WEBHOOK_URL }}
+      shell: bash
+      run: |
+        passed_scenarios_count=$(jq '.[].elements | map(select(.keyword == "Scenario" and (.steps | all(.result.status == "passed")))) | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        outline_passed_scenarios_count=$(jq '[.[] | .elements | map(select(.keyword == "Scenario Outline" and (.steps | all(.result.status == "passed"))))] | flatten | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        scenarios_count=$(jq '.[].elements | map(select(.keyword == "Scenario")) | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        outline_scenarios_total=$(jq '[.[] | .elements | map(select(.keyword == "Scenario Outline"))] | flatten | length' "$GITHUB_WORKSPACE/API/target/cucumber-json/webops-automation-tests.json")
+        total_passed_scenarios=$((passed_scenarios_count + outline_passed_scenarios_count))
+        total_scenarios=$((outline_scenarios_total + scenarios_count))
+        job_name="${{ github.job }}"
+        github_run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        if [[ "${{ github.event_name }}" == "schedule" ]]; then
+          execution_type="Scheduled"
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          execution_type="Manual"
+          triggered_by="Triggered by: ${{ github.actor }}"
+        else
+          execution_type="Unknown"
+        fi 
+        branch=$(echo "${{ github.ref }}" | sed 's/refs\/heads\///')
+        message="*${job_name}* Successfully executed.\\nExecution type: *${execution_type}*\\nBranch: *${branch}*\\n${triggered_by}\\n:white_check_mark: Test Cases passed: $total_passed_scenarios/$total_scenarios"
+        curl -X POST -H 'Content-type: application/json' --data "{
+          \"text\": \"$message\",
+          \"attachments\": [
+            {
+              \"fallback\": \"View on GitHub\",
+              \"actions\": [
+                {
+                  \"type\": \"button\",
+                  \"text\": \"View Execution Details\",
+                  \"url\": \"$github_run_url\",
+                  \"style\": \"primary\",
+                  \"emoji\": true
+                },
+                {
+                  \"type\": \"button\",
+                  \"text\": \"Download Results\",
+                  \"url\": \"$github_run_url\",
+                  \"style\": \"primary\",
+                  \"emoji\": \":arrow_down:\"
+                }
+              ]
+            }
+          ]
+        }" $SLACK_WEBHOOK_URL
+

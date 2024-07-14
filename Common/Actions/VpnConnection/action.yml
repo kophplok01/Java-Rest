@@ -1,0 +1,23 @@
+name: 'Slack Notification on Success'
+description: 'Sends Slack notification on workflow Success.'
+author: 'Tu Nombre'
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Restore repository checkout from cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}
+        key: ${{ runner.os }}-checkout-${{ github.sha }}
+
+    - name: Install OpenVPN
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y openvpn
+
+    - name: Connect to VPN
+      shell: bash
+      run: sudo openvpn --config $GITHUB_WORKSPACE/webops-dev.ovpn --auth-user-pass $GITHUB_WORKSPACE/credentials.txt &
+
